@@ -30,6 +30,7 @@ def main(argv) -> int:
             continue
         i += 1
 
+    # create a state array indicating which parts of the input string are enabled and which aren't
     enabled: list[bool] = []
     do_idx: int = 0
     dont_idx: int = 0
@@ -41,6 +42,8 @@ def main(argv) -> int:
         elif len(dos) > do_idx and i == dos[do_idx]:
             currently_enabled = True
             do_idx += 1
+        # memory is cheap; record a boolean at EACH and EVERY location in our input string....
+        # .... this could be far more efficient with a sparse array .... but that would take longer.
         enabled.append(currently_enabled)
 
     # sweep the content looking for mul strings
@@ -71,6 +74,8 @@ def main(argv) -> int:
         operand_beta: int = int(bits[3])
         operations.append((operation, operand_alpha, operand_beta))
 
+    # accommodate future missions with multiple operators ... (mind you it'll probably be reverse polish
+    # notation or something more perverse).
     result: int = 0
     for operation, operand_alpha, operand_beta in operations:
         if operation == 'mul':
