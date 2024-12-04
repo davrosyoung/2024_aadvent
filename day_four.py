@@ -85,7 +85,7 @@ def main(argv: list[str]):
     result = part_one(path='day_four_actual_input.txt')
     print(f'part one: {result=} for actual data')
 
-    result = part_two(path='day_four_part_two_test_input.txt')
+    result = part_two(path='day_four_test_input.txt')
     print(f'part two: {result=} for test data')
     if result != 9:
         raise Exception('Test failed')
