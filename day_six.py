@@ -74,7 +74,7 @@ def has_obstacle(location: tuple[int, int], map: list[list[int]]) -> bool:
     obstructed: bool = column in row_obstacles
     return obstructed
 
-def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], location: tuple[int, int], direction: int, breadcrumbs: dict[tuple[int, int], set[int]]|None=None) -> tuple[bool, bool, dict[tuple[int, int], set[int]]]:
+def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], location: tuple[int, int], direction: int, breadcrumbs: dict[tuple[int, int], set[int]]|None=None) -> tuple[bool, bool, list[tuple[int, int, int]]]:
     """Follows the specified path until either we wander off the reservation or find ourselves back where we started...."""
     if breadcrumbs is None:
         breadcrumbs = {}
@@ -82,6 +82,7 @@ def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], loc
     loop_detected: bool = False
     next_location: tuple[int, int]|None = None
     next_direction: int = direction  # until it gets altered!!
+    alternate_history: list[tuple[int, int, int]] = []
 
     out_of_bounds: bool = False
     while not out_of_bounds:
@@ -116,8 +117,9 @@ def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], loc
             breadcrumbs[location] = {direction}
         else:
             breadcrumbs[location].add(direction)
+        alternate_history.append((location[0], location[1], direction))
 
-    return out_of_bounds, loop_detected, breadcrumbs
+    return out_of_bounds, loop_detected, alternate_history
 
 
 def road_to_nowhere(map: list[list[int]], location: tuple[int, int], direction: int, breadcrumbs: dict[tuple[int, int], set[int]]|None=None) -> bool:
@@ -222,6 +224,7 @@ def part_two(path: str) -> int:
     guard_direction: int = None
     east_boundary: int = None
     south_boundary: int = None
+    history: list[tuple[int, int, int]] = []
 
     # gather the obstacles and guard position in one fell swoop...
     with open(path, 'r') as file:
@@ -257,6 +260,7 @@ def part_two(path: str) -> int:
     next_direction: int = guard_direction # until we change it
     breadcrumbs: dict[tuple[int, int], set[int]] = {}
     breadcrumbs[(guard_position)] = {guard_direction}
+    history.append((guard_position[0], guard_position[1], guard_direction))
     out_of_bounds: bool = False
     while not out_of_bounds:
         next_position: tuple[int, int] = next_step(guard_position, next_direction)
@@ -283,7 +287,7 @@ def part_two(path: str) -> int:
         map_with_extra_obstacle: list[list[int]] = obstacles.copy()
         map_with_extra_obstacle[next_position[0]].append(next_position[1])         # place obstacle where we're headed.
         copy_of_breadcrumbs: dict[tuple[int, int], set[int]] = breadcrumbs.copy()  # we don't want to mutate the actual path we've taken
-        exits_map, would_loop, breadcrumbs = perambulate(map=obstacles, boundaries=boundaries, location=guard_position, direction=guard_direction, breadcrumbs=copy_of_breadcrumbs)
+        exits_map, would_loop, fake_history = perambulate(map=obstacles, boundaries=boundaries, location=guard_position, direction=guard_direction, breadcrumbs=copy_of_breadcrumbs)
         if would_loop:
             # if following a path with the extra obstacle ends up looping, then record the fact that we found this solution
             result += 1
@@ -294,6 +298,7 @@ def part_two(path: str) -> int:
 
         # record the fact that we've visited this location in this heading...
         breadcrumbs[(guard_position)] = {guard_direction}
+        history.append((guard_position[0], guard_position[1], guard_direction))
 
     return result
 
