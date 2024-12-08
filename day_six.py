@@ -1,5 +1,6 @@
 import sys
 import re
+from copy import deepcopy
 
 ORDER_LINE_INFO_PATTERN = re.compile(r'^\s*(\d+)\s*\|\s*(\d+)\s*$')
 PAGES_LINE_INFO_PATTERN = re.compile(r'^\s*(\d+)\s*(,\s*(\d+)\s*)*$')
@@ -20,6 +21,9 @@ steps: dict[int, tuple[int, int]] = {
     SOUTH: (1, 0),
     WEST: (0, -1),
 }
+
+verbose: bool = False
+very_verbose: bool = False
 
 
 def turn_right(direction: int) -> int:
@@ -84,8 +88,11 @@ def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], loc
     next_direction: int = direction  # until it gets altered!!
     alternate_history: list[tuple[int, int, int]] = []
 
+    if very_verbose:
+        print('... in perambulate()')
+
     out_of_bounds: bool = False
-    while not out_of_bounds:
+    while not out_of_bounds and not loop_detected:
         next_location = next_step(location=location, direction=direction)
         out_of_bounds: bool = off_the_reservation(location=next_location, boundaries=boundaries)
         if out_of_bounds:
@@ -93,10 +100,12 @@ def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], loc
 
         # if the next step would encounter an obstacle, then point ourselves in a new direction.
         remaining_turn_count: int = 4
-        while has_obstacle(location=next_location, map=map) and remaining_turn_count > 0:
+        blocked: bool = has_obstacle(location=next_location, map=map)
+        while blocked and remaining_turn_count > 0:
             # turn right instead.....
-            next_direction = turn_right(direction)
+            next_direction = turn_right(next_direction)
             next_location = next_step(location=location, direction=next_direction)
+            blocked: bool = has_obstacle(location=next_location, map=map)
             remaining_turn_count -= 1
 
         # if blocked in all directions; then we're done.
@@ -119,34 +128,9 @@ def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], loc
             breadcrumbs[location].add(direction)
         alternate_history.append((location[0], location[1], direction))
 
+    if very_verbose:
+        print(f'..... returning from perambulate() with {out_of_bounds=}, {loop_detected=}')
     return out_of_bounds, loop_detected, alternate_history
-
-
-def road_to_nowhere(map: list[list[int]], location: tuple[int, int], direction: int, breadcrumbs: dict[tuple[int, int], set[int]]|None=None) -> bool:
-    """Return true if heading off in the specified direction from the specified
-    location ends up with the guard following an endless loop."""
-    if breadcrumbs is None:
-        breadcrumbs = {}
-
-
-    if location in breadcrumbs:
-        if direction in breadcrumbs[location]:
-            return True
-        breadcrumbs[location].add(direction)
-    else:
-        breadcrumbs[location] = set([direction])
-    next_location: tuple[int, int] = next_step(location=location, direction=direction)
-    if has_obstacle(location=next_location, map=map):
-        return leads_nowhere(map=map, location=next_location, direction=turn_right(direction), breadcrumbs=breadcrumbs)
-    if next_location in breadcrumbs:
-        if direction in breadcrumbs[next_location]:
-            return True
-        breadcrumbs[next_location].add(direction)
-    else:
-        breadcrumbs[next_location] = set([direction])
-    breadcrumbs: dict[tuple[int, int], set[int]] = {}
-    return False
-
 
 def part_one(path: str) -> int:
     result: int = 0
@@ -253,7 +237,8 @@ def part_two(path: str) -> int:
     south_boundary = row_index - 1
     boundaries: tuple[int, int, int, int] = (0, east_boundary, south_boundary, 0)
 
-    print(f'Found guard at {guard_position=}, {guard_direction=}, {boundaries=}')
+    if verbose:
+        print(f'Found guard at {guard_position=}, {guard_direction=}, {boundaries=}')
 
     # now for the "wandering about" ....
     next_position: tuple[int, int]|None = None
@@ -262,6 +247,12 @@ def part_two(path: str) -> int:
     breadcrumbs[(guard_position)] = {guard_direction}
     history.append((guard_position[0], guard_position[1], guard_direction))
     out_of_bounds: bool = False
+
+    exits_map: bool = None
+    alternate_history: list[tuple[int, int, int]] = None
+    would_loop: bool = None
+    new_obstacles: set[tuple[int, int]] = set()
+
     while not out_of_bounds:
         next_position: tuple[int, int] = next_step(guard_position, next_direction)
         next_out_of_bounds: bool = off_the_reservation(next_position, boundaries)
@@ -282,19 +273,40 @@ def part_two(path: str) -> int:
         if remaining_turn_count == 0:
             raise Exception(f'Did not expect this to occur!! {guard_position=}, {guard_direction=}, {next_position=}, {next_direction=}, {remaining_turn_count=}')
 
-        # before we take the next step ... would adding an obstacle there cause the guard to have to turn and end
-        # up pursuing the same path over and over?!?
-        map_with_extra_obstacle: list[list[int]] = obstacles.copy()
-        map_with_extra_obstacle[next_position[0]].append(next_position[1])         # place obstacle where we're headed.
-        copy_of_breadcrumbs: dict[tuple[int, int], set[int]] = breadcrumbs.copy()  # we don't want to mutate the actual path we've taken
-        exits_map, would_loop, fake_history = perambulate(map=obstacles, boundaries=boundaries, location=guard_position, direction=guard_direction, breadcrumbs=copy_of_breadcrumbs)
-        if would_loop:
-            # if following a path with the extra obstacle ends up looping, then record the fact that we found this solution
-            result += 1
+        if next_direction != guard_direction:
+            if verbose:
+                print(f'At location {guard_position}, now marching {DIRECTION[next_direction]} rather than {DIRECTION[guard_direction]}')
+
+        # only consider adding an obstance if we have not already placed an additional obstacle at the next location
+        been_there_done_that: bool = next_position in new_obstacles
+        if not been_there_done_that:
+            # before we take the next step ... would adding an obstacle there cause the guard to have to turn and end
+            # up pursuing the same path over and over?!?
+            map_with_extra_obstacle: list[list[int]] = deepcopy(obstacles)
+            map_with_extra_obstacle[next_position[0]].append(next_position[1])         # place obstacle where we're headed.
+            copy_of_breadcrumbs: dict[tuple[int, int], set[int]] = deepcopy(breadcrumbs)  # we don't want to mutate the actual path we've taken
+            # it is important that whilst we start our walk from the current position; it is done with the
+            # guard walking in whatever direction they would take next (which is where the extra obstacle has been placed).
+
+            if very_verbose:
+                print('about to perambulate')
+            triplet: tuple[bool, bool, list[tuple[int, int, int]]] = perambulate(map=map_with_extra_obstacle, boundaries=boundaries, location=guard_position, direction=next_direction, breadcrumbs=copy_of_breadcrumbs)
+            if very_verbose:
+                print('returned from perambulate')
+            exits_map = triplet[0] if triplet else None
+            would_loop = triplet[1] if triplet else None
+            fake_history = triplet[2] if triplet else None
+            if would_loop:
+                # if following a path with the extra obstacle ends up looping, then record the fact that we found this solution
+                print(f'Would add an obstacle at {next_position} to cause loop.')
+                result += 1
+                new_obstacles.add(next_position)
 
         # now continue onto the next position
         guard_position = next_position
         guard_direction = next_direction
+        if verbose:
+            print(f'Now at location {guard_position=}, {guard_direction=}')
 
         # record the fact that we've visited this location in this heading...
         breadcrumbs[(guard_position)] = {guard_direction}
@@ -305,14 +317,20 @@ def part_two(path: str) -> int:
 
 
 def main(argv: list[str]):
-
+    global very_verbose
+    global verbose
+    very_verbose = False
+    verbose = False
     result: int = 0
-    result = part_one(path='day_six_test_input.txt')
-    print(f'part one: {result=} for test data')
-    if result != 41:
-        raise Exception(f'Test failed, expected 41 but instead got {result}')
-    result = part_one(path='day_six_input.txt')
-    print(f'part one: {result=} for actual data')
+#    result = part_one(path='day_six_test_input.txt')
+#    print(f'part one: {result=} for test data')
+#    if result != 41:
+#        raise Exception(f'Test failed, expected 41 but instead got {result}')
+#    result = part_one(path='day_six_input.txt')
+#    print(f'part one: {result=} for actual data')
+#
+    result = part_two(path='day_six_small_test_input.txt')
+    print(f'part two: {result=} for small test data')
 
     result = part_two(path='day_six_test_input.txt')
     print(f'part two: {result=} for test data')
