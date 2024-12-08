@@ -105,7 +105,7 @@ def perambulate(map: list[list[int]], boundaries: tuple[int, int, int, int], loc
             # turn right instead.....
             next_direction = turn_right(next_direction)
             next_location = next_step(location=location, direction=next_direction)
-            blocked: bool = has_obstacle(location=next_location, map=map)
+            blocked: bool = off_the_reservation(location=next_location, boundaries=boundaries) or has_obstacle(location=next_location, map=map)
             remaining_turn_count -= 1
 
         # if blocked in all directions; then we're done.
@@ -201,6 +201,68 @@ def part_one(path: str) -> int:
     result = len(breadcrumbs.keys())
     return result
 
+
+def render(obstacles: list[list[int]], new_obstacles: set[tuple[int, int]], breadcrumbs: dict[tuple[int, int], set[int]], boundaries: tuple[int, int, int, int], prioritise_new_obstacles: bool = False):
+    row_index: int = 0
+    header_one: str = '    '
+    header_two: str = '    '
+    for i in range(boundaries[EAST] + 1):
+        header_one += str(int(i / 10) % 10)
+        header_two += str(i % 10)
+    print(header_one)
+    print(header_two)
+
+    while row_index <= boundaries[SOUTH]:
+        column_index: int = 0
+        line: str = f'{row_index:03d} '
+        while column_index <= boundaries[EAST]:
+            location: tuple[int, int] = (row_index, column_index)
+            directions: set[int] = breadcrumbs.get(location)
+            horizontal: bool = directions and (WEST in directions or EAST in directions)
+            vertical: bool = directions and (NORTH in directions or SOUTH in directions)
+            if location in new_obstacles:
+                if horizontal and vertical:
+                    line += u'\u2295'
+                elif horizontal:
+                    line += u'\u2296'
+                elif vertical:
+                    line += u'\u233d'
+                else:
+                    line += 'O'
+            elif location in breadcrumbs:
+                directions: set[int] = breadcrumbs.get(location)
+                horizontal: bool = WEST in directions or EAST in directions
+                vertical: bool = NORTH in directions or SOUTH in directions
+                if horizontal and vertical:
+                    line += '+'
+                elif horizontal:
+                    if WEST in directions and EAST in directions:
+                        line += '-'
+                    elif WEST in directions:
+                        line += '<'
+                    elif EAST in directions:
+                        line += '>'
+                elif vertical:
+                    if SOUTH in directions and NORTH in directions:
+                        line += '|'
+                    elif NORTH in directions:
+                        line += '^'
+                    elif SOUTH in directions:
+                        line += 'V'
+                else:
+                    raise Exception(f'WTF?! at {location=}, directions={directions}')
+                if column_index in obstacles[row_index]:
+                    raise Exception(f'WTF? breadcrumbs AND obstacle at {location=}')
+            elif column_index in obstacles[row_index]:
+                line += '#'
+            else:
+                line += '.'
+            column_index += 1
+        print(line)
+        row_index += 1
+    return
+
+
 def part_two(path: str) -> int:
     result: int = 0
     obstacles: list[list[int]] = []
@@ -240,6 +302,9 @@ def part_two(path: str) -> int:
     if verbose:
         print(f'Found guard at {guard_position=}, {guard_direction=}, {boundaries=}')
 
+    start_position: tuple[int, int] = (guard_position[0], guard_position[1])
+
+
     # now for the "wandering about" ....
     next_position: tuple[int, int]|None = None
     next_direction: int = guard_direction # until we change it
@@ -252,6 +317,10 @@ def part_two(path: str) -> int:
     alternate_history: list[tuple[int, int, int]] = None
     would_loop: bool = None
     new_obstacles: set[tuple[int, int]] = set()
+    spin_out_count: int = 0
+
+
+    render(obstacles=obstacles, new_obstacles=new_obstacles, breadcrumbs=breadcrumbs, boundaries=boundaries)
 
     while not out_of_bounds:
         next_position: tuple[int, int] = next_step(guard_position, next_direction)
@@ -267,7 +336,7 @@ def part_two(path: str) -> int:
             # we need to change direction....
             next_direction = turn_right(next_direction)
             next_position = next_step(guard_position, next_direction)
-            blocked = has_obstacle(next_position, obstacles)
+            blocked = off_the_reservation(location=next_position, boundaries=boundaries) or has_obstacle(next_position, obstacles)
             remaining_turn_count -= 1
 
         if remaining_turn_count == 0:
@@ -277,9 +346,10 @@ def part_two(path: str) -> int:
             if verbose:
                 print(f'At location {guard_position}, now marching {DIRECTION[next_direction]} rather than {DIRECTION[guard_direction]}')
 
-        # only consider adding an obstance if we have not already placed an additional obstacle at the next location
+        # only consider adding an obstacle if we have not already placed an additional obstacle at the next location
+        # AND ensure not at the starting position.
         been_there_done_that: bool = next_position in new_obstacles
-        if not been_there_done_that:
+        if not been_there_done_that and next_position != start_position:
             # before we take the next step ... would adding an obstacle there cause the guard to have to turn and end
             # up pursuing the same path over and over?!?
             map_with_extra_obstacle: list[list[int]] = deepcopy(obstacles)
@@ -295,12 +365,16 @@ def part_two(path: str) -> int:
                 print('returned from perambulate')
             exits_map = triplet[0] if triplet else None
             would_loop = triplet[1] if triplet else None
-            fake_history = triplet[2] if triplet else None
+            alternate_history = triplet[2] if triplet else None
+
+            if guard_position == (121,5) and guard_direction == WEST:
+                render(obstacles=obstacles, new_obstacles=new_obstacles, breadcrumbs=breadcrumbs, boundaries=boundaries)
             if would_loop:
                 # if following a path with the extra obstacle ends up looping, then record the fact that we found this solution
-                print(f'Would add an obstacle at {next_position} to cause loop.')
+                print(f'Would add an obstacle at {next_position} to cause loop. currently at {guard_position} marching {DIRECTION[guard_direction]}, {result=}')
                 result += 1
                 new_obstacles.add(next_position)
+
 
         # now continue onto the next position
         guard_position = next_position
@@ -309,8 +383,13 @@ def part_two(path: str) -> int:
             print(f'Now at location {guard_position=}, {guard_direction=}')
 
         # record the fact that we've visited this location in this heading...
-        breadcrumbs[(guard_position)] = {guard_direction}
+        if guard_position in breadcrumbs:
+            breadcrumbs[guard_position].add(guard_direction)
+        else:
+            breadcrumbs[guard_position] = {guard_direction}
         history.append((guard_position[0], guard_position[1], guard_direction))
+    render(obstacles=obstacles, new_obstacles=new_obstacles, breadcrumbs=breadcrumbs, boundaries=boundaries)
+    print(f'{guard_position=}, {guard_direction=}, {result=}, len(new_obstacles)={len(new_obstacles)}, {new_obstacles=}')
 
     return result
 
@@ -329,15 +408,18 @@ def main(argv: list[str]):
 #    result = part_one(path='day_six_input.txt')
 #    print(f'part one: {result=} for actual data')
 #
-    result = part_two(path='day_six_small_test_input.txt')
-    print(f'part two: {result=} for small test data')
+#    result = part_two(path='day_six_small_test_input.txt')
+#    print(f'part two: {result=} for small test data')
 
-    result = part_two(path='day_six_test_input.txt')
-    print(f'part two: {result=} for test data')
-    if result != 6:
-        raise Exception(f'Test failed, expected 6 but instead got {result}')
-    result: int = part_two(path='day_six_input.txt')
-    print(f'part two: {result=} for actual data')
+    result = part_two(path='day_six_davros_input.txt')
+    print(f'part two: {result=} for davros test data')
+
+ #   result = part_two(path='day_six_test_input.txt')
+ #   print(f'part two: {result=} for test data')
+ #   if result != 6:
+ #       raise Exception(f'Test failed, expected 6 but instead got {result}')
+ #   result: int = part_two(path='day_six_input.txt')
+ #   print(f'part two: {result=} for actual data')
 
     return 0
 
